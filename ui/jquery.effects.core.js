@@ -145,75 +145,107 @@ var colors = {
 /****************************** CLIP ANIMATIONS *******************************/
 /******************************************************************************/
 
-// jQuery css clip animation support
-// Idea borrowed (and mangled) from the clip plugin by Jim Palmer
-// http://www.overset.com/2008/08/07/jquery-css-clip-animation-plugin/
+// XXX: Unit conversion might be better placed in jQuery Core
+var rfxnum = /^([\d+.\-]+)([a-z%]*)$/i;
 
 $.fx.step.clip = function(fx) {
-   var getClip = function(elem) {
-      // IE refuses to return 'clip'
-      // but has no problem with 'clipTop' and the likes
-      // This unpleasantness reconstructs what a "good" browser would return
-      var cs = elem.currentStyle;
-      return (!elem.style.clip && cs) ?
-        'rect(' + [cs.clipTop, cs.clipRight, cs.clipBottom, cs.clipLeft].join(', ') + ')'
-      : elem.style.clip;
-   }
+	if (fx.state == 0) {  // This is a roundabout fx.custom overload
+		var $elem = $(fx.elem);
+		fx.start = $elem.css('clipRect');
 
-   if (fx.state == 0) {
-      var $elem = $(fx.elem);
-      fx.start = getClip(fx.elem);
-      
-      var sUnits;
-      $.each(['start', 'end'],
-         function(i, attr) {
-            if (typeof fx[attr] === 'object') return;
-            
-            var cRE  = (typeof fx[attr] === 'string') ? fx[attr].match(/^rect\(([\w\s\.\,]+)\)$/) : [];
-            var quad = (cRE && cRE[1]) ? cRE[1].split(/[\s\,]+/) : [];  // default of auto would also hit []
-            
-            // check units & convert numbers
-            var units = [];
-            for (var i = 0; i <= 3; i++) {
-               if (quad[i] === 'auto') {
-                  quad[i]  = parseInt('NaN');
-                  units[i] = 'auto';
-               }
-               else {
-                  var parts = quad[i].match(/([\d\.]+)(\%|em|p[xt])/);
-                  quad[i]  = parseInt(parts ? parts[1] : quad[i]);
-                  units[i] = parts ? parts[2] : 'px';
-               }
-               
-               // convert units if necessary
-               if (attr === 'end' && units[i] != sUnits[i] && units[i] !== 'auto')
-                  fx.start[i] = $elem.cssUnitConvert($elem, fx.start[i], sUnits[i], units[i], i % 2);
-            }
-            if (attr === 'end') fx.unit = units;
-            else                sUnits  = units;
-            
-            // defaults, per CSS2.1 11.1.2
-            // 'auto' means the same as '0' for <top> and <left>
-            if (isNaN(quad[0]) || typeof quad[0] === 'undefined') quad[0] = 0;                    // top
-            if (isNaN(quad[3]) || typeof quad[3] === 'undefined') quad[3] = 0;                    // left
-            // width plus the sum of the horizontal padding and border widths for <right>
-            if (isNaN(quad[1]) || typeof quad[1] === 'undefined') quad[1] = $elem.outerWidth();   // right
-            // height plus the sum of vertical padding and border widths for <bottom>
-            if (isNaN(quad[2]) || typeof quad[2] === 'undefined') quad[2] = $elem.outerHeight();  // bottom
-            
-            fx[attr] = quad;
-         }
-      );
-   }
-   
-   var rectArr = [];
-   for (var i = 0; i <= 3; i++) {
-      rectArr[i] = (fx.unit[i] === 'auto') ? fx.unit[i] : parseInt((fx.pos * (fx.end[i] - fx.start[i])) + fx.start[i]) + fx.unit[i];
-   }
-   fx.elem.style.clip = 'rect(' + rectArr.join(', ') + ')';
-   fx.now = fx.elem.style.clip;
+		// defaults, per CSS2.1 11.1.2
+		// 'auto' means the same as '0' for <top> and <left>
+		// width plus the sum of the horizontal padding and border widths for <right>
+		// height plus the sum of vertical padding and border widths for <bottom>
+		var defaults = [0, $elem.outerWidth(), $elem.outerHeight(), 0];
+
+		var sUnits;
+		$.each(['start', 'end'],
+			function(i, attr) {
+				// define quad as a 4-item Array
+				var quad;
+				if (typeof fx[attr] === 'object') quad = fx[attr];
+				else {
+					var cRE = fx[attr].match(/^rect\(([\w\s\.\,]+)\)$/);
+					quad = (cRE && cRE[1]) ? cRE[1].split(/[\s\,]+/) : [];
+
+					for (var i = 0; i <= 3; i++) {
+						if (isNaN(parseInt(quad[i])) || typeof quad[i] === 'undefined') quad[i] = 'auto';
+					}
+				}
+
+				// check units & convert numbers
+				var units = [];
+				for (var i = 0; i <= 3; i++) {
+					if (quad[i] === 'auto') {
+						if (attr === 'start') {
+							quad[i]  = defaults[i];
+							units[i] = 'px';
+						}
+						else units[i] = 'auto';
+					}
+					else {
+						var parts = rfxnum.exec(quad[i]);
+						quad[i]  = parseInt(parts ? parts[1] : quad[i]);
+						units[i] = parts ? parts[2] : 'px';
+					}
+
+					// convert units if necessary
+					if (attr === 'end' && units[i] != sUnits[i] && units[i] !== 'auto')
+						fx.start[i] = $elem.cssUnitConvert(fx.start[i], { 
+							startUnit: sUnits[i],
+							endUnit:   units[i],
+							isHoriz:   i % 2
+						});
+				}
+				if (attr === 'end') fx.unit = units;
+				else                sUnits  = units;
+
+				for (var i = 0; i <= 3; i++) {
+					if (quad[i] == 'auto') quad[i] = defaults[i];
+				}
+
+				fx[attr] = quad;
+			}
+		);
+	}
+
+	var rectArr = [];
+	for (var i = 0; i <= 3; i++) {
+		rectArr[i] = (fx.unit[i] === 'auto') ? fx.unit[i] : Math.round((fx.pos * (fx.end[i] - fx.start[i])) + fx.start[i]) + fx.unit[i];
+	}
+	fx.elem.style.clip = fx.now = 'rect(' + rectArr.join(', ') + ')';
 };
 
+$.fx.step['clipRect'] = $.fx.step.clip;
+
+$.each(['clipTop', 'clipRight', 'clipBottom', 'clipLeft'],
+function(i, attr) {
+	$.fx.step[attr] = function(fx) {
+		if (fx.state == 0) {
+			var $elem = $(fx.elem);
+			var defaults = [0, $elem.outerWidth(), $elem.outerHeight(), 0];
+			var i = $.cssHooks.clipRect.arrMatch[attr];
+
+			fx.start = $elem.css(attr);
+			var parts = rfxnum.exec(fx.start);
+
+			// replace 'auto', if necessary
+			if (fx.start === 'auto') fx.start = defaults[i];
+
+			// check unit mismatches
+			if (parts && parts[2] && parts[2] !== fx.unit)
+				fx.start = $elem.cssUnitConvert(fx.start[i], { 
+					startUnit: parts[2],
+					endUnit:   fx.unit,
+					isHoriz:   i % 2
+				});
+			else fx.start = fx.cur();
+		}
+
+		$.cssHooks[attr].set(fx.elem, Math.round(fx.now) + fx.unit);
+	};
+});
 
 /******************************************************************************/
 /****************************** CLASS ANIMATIONS ******************************/
@@ -405,7 +437,88 @@ $.fn.extend({
 	}
 });
 
+/******************************************************************************/
+/********************************** CSS HOOKS *********************************/
+/******************************************************************************/
 
+$.extend( $.cssHooks, {
+	clip: {
+		get: function( elem, computed, extra ) {
+			// IE refuses to return 'clip'
+			// but has no problem with 'clipTop' and the likes
+			// This unpleasantness reconstructs what a "good" browser would return
+			return (!elem.style.clip && elem.currentStyle) ?
+			'rect(' + elem.css('clipRect').join(', ') + ')'
+			: elem.style.clip;
+		},
+		set: function( elem, value ) {
+			elem.style.clip = value;
+		}
+	},
+
+	clipRect: {
+		get: function(elem, computed, extra) {
+			// IE
+			var cs = elem.currentStyle;
+			if (cs && typeof cs.clipTop != 'undefined') return [cs.clipTop, cs.clipRight, cs.clipBottom, cs.clipLeft];
+
+			// Others
+			var clip = elem.style.clip;
+			var cRE  = clip.match(/^rect\(([\w\s\.\,]+)\)$/);
+			if (!cRE || !cRE[1]) return ['auto','auto','auto','auto'];
+			var quad = cRE[1].split(/[\s\,]+/);
+
+			for (var i = 0; i <= 3; i++) {
+				if (isNaN(parseInt(quad[i])) || typeof quad[i] === 'undefined') quad[i] = 'auto';
+			}
+
+			return quad;
+		},
+		set: function(elem, value) {
+			if (typeof value === 'string') return $(elem).css('clip', value);
+			if (typeof value === 'object') return $(elem).css('clip', 'rect(' + value.join(', ') + ')');
+			return null;
+		},
+		arrMatch: {
+			clipTop:    0,
+			clipRight:  1,
+			clipBottom: 2,
+			clipLeft:   3
+		}
+	}
+});
+
+$.each(['clipTop', 'clipRight', 'clipBottom', 'clipLeft'],
+function(i, attr) {
+	$.cssHooks[attr] = {
+		get: function(elem, computed, extra) {
+			var val;
+			// IE
+			var cs = elem.currentStyle;
+			if (cs && typeof cs[attr] != 'undefined') val = cs[attr];
+			// Others
+			else {
+				var quad = $(elem).css('clipRect');
+				val = quad[$.cssHooks.clipRect.arrMatch[attr]];
+			}
+			
+			// if something is asking for a single value here,
+			// we should expand 'auto' to the proper px equiv
+			if (val == 'auto' || isNaN(parseInt(val))) {
+				var $elem = $(elem);
+				var defaults = [0, $elem.outerWidth(), $elem.outerHeight(), 0];
+				val = defaults[$.cssHooks.clipRect.arrMatch[attr]];
+			}
+			
+			return val;
+		},
+		set: function( elem, value ) {
+			var quad = $(elem).css('clipRect');
+			quad[$.cssHooks.clipRect.arrMatch[attr]] = value;
+			return $(elem).css('clipRect', quad);
+		}
+	};
+});
 
 /******************************************************************************/
 /*********************************** EFFECTS **********************************/
@@ -551,7 +664,60 @@ $.extend( $.effects, {
 			if ( unit[ 0 ] > 0 ) value[ x ] = unit[ 0 ] * factor + unit[ 1 ];
 		});
 		return value;
+	},
+
+	dirNormFlipHash: {
+		topleft    : 'bottomRight',
+		top        : 'bottom',
+		topright   : 'bottomLeft',
+		centerleft : 'centerRight',
+		center     : 'center',
+		centerright: 'centerLeft',
+		bottomleft : 'topRight',
+		bottom     : 'top',
+		bottomright: 'topLeft',
+
+		upperleft  : 'lowerRight',
+		up         : 'down',
+		upperright : 'lowerLeft',
+		left       : 'right',
+		middleleft : 'middleRight',
+		middle     : 'middle',
+		middleright: 'middleLeft',
+		right      : 'left',
+		lowerleft  : 'upperRight',
+		down       : 'up',
+		lowerright : 'upperLeft'
+	},
+
+	cssUnitTypeHash: {
+		em  : 'l',  // length
+		ex  : 'l',
+		ch  : 'l',
+		rem : 'l',
+		vw  : 'l',
+		vh  : 'l',
+		vmin: 'l',
+		cm  : 'l',
+		mm  : 'l',
+		'in': 'l',
+		px  : 'l',
+		pt  : 'l',
+		pc  : 'l',
+		'%' : 'l',
+		deg : 'a',  // angle
+		grad: 'a',
+		rad : 'a',
+		turn: 'a',
+		s   : 't',  // time
+		ms  : 't',
+		Hz  : 'f',  // frequency
+		kHz : 'f',
+		dpi : 'r',  // resolution
+		dpcm: 'r',
+		dppx: 'r'
 	}
+
 });
 
 // return an effect options object for the given parameters:
@@ -726,47 +892,140 @@ $.fn.extend({
 				val = [ parseFloat( style ), unit ];
 		});
 		return val;
-	}
-   
-   // conversion of units
-   cssUnitConvert: function(n, fUnit, sUnit, isHoriz) {
-		var elem = $(this);
-      n = parseFloat(n);
-      var dpi = 96;  // not a totally accurate assumption, but it'll work for now...
-      
-      // convert n to px
-      switch (fUnit) {
-         case 'px': break;
-         case 'pt': n *= 72/dpi;    break;
-         case 'pc': n *= 72/dpi*12; break;
-         case 'in': n *= dpi;       break;
-         case 'cm': n *= dpi/2.54;  break;
-         case 'mm': n *= dpi/25.4;  break;
-         case 'em': n *= 72/dpi * elem.css('fontSize');     break;
-         case 'ex': n *= 72/dpi * elem.css('fontSize') / 2; break;
-         case '%' : n *= (isHoriz ? elem.outerWidth() : elem.outerHeight()) / 100; break;
-         default  : break;  // assume px
-      }
-      
-      // convert n to sUnit
-      switch (sUnit) {
-         case 'px': break;
-         case 'pt': n /= 72/dpi;    break;
-         case 'pc': n /= 72/dpi*12; break;
-         case 'in': n /= dpi;       break;
-         case 'cm': n /= dpi/2.54;  break;
-         case 'mm': n /= dpi/25.4;  break;
-         case 'em': n /= 72/dpi * elem.css('fontSize');     break;
-         case 'ex': n /= 72/dpi * elem.css('fontSize') / 2; break;
-         case '%' : n /= (isHoriz ? elem.outerWidth() : elem.outerHeight()) / 100; break;
-         default  : break;  // assume px
-      }
-      
+	},
+
+	// conversion of units
+	cssUnitConvert: function(n, opts) {
+		var $elem = $(this);
+		
+		var sUnit   = opts['startUnit'];
+		var eUnit   = opts['endUnit'];
+		var isHoriz = (opts['isHoriz'] || !opts['isVert']);
+		
+		// sanity checks
+		var parts = rfxnum.exec(n);
+		if (!parts)   return null;
+		if (parts[2]) sUnit = parts[2];  // unit can be built into n
+		if (!sUnit)   eUnit = 'px';
+		n = parseFloat(parts[1]);
+		
+		var dpi = 96;  // per CSS3-Values/Units, DPI has a fixed value of 96
+
+		// check for unit type uniformity
+		if ($.effects.cssUnitTypeHash[sUnit] !== $.effects.cssUnitTypeHash[eUnit]) return null;
+
+		// certain variables that might cost CPU
+		var fontSize, rootFontSize, vW, vH, elemWH;
+		if ($.effects.cssUnitTypeHash[sUnit] == 'l') {
+			var unitChk = ':' + sUnit + ':' + eUnit;
+			if (/:(e[mx]|ch)/.test(unitChk)) fontSize     = parseInt($elem.css('fontSize'));
+			if (/:rem/.test(unitChk))        rootFontSize = parseInt($(this.ownerDocument.firstChild).css('fontSize'));
+			if (/:v(w|min)/.test(unitChk))   vW     = $(window).width();
+			if (/:v(h|min)/.test(unitChk))   vH     = $(window).height();
+			if (/:\%/.test(unitChk))         elemWH = (isHoriz ? $elem.outerWidth() : $elem.outerHeight());
+		}
+
+		// convert n to px/turn/s/Hz/dpi
+		switch (sUnit) {
+			case 'px'  :                              break;
+			case 'pt'  : n *= 72/dpi;                 break;
+			case 'pc'  : n *= 72/dpi*12;              break;
+			case 'in'  : n *= dpi;                    break;
+			case 'cm'  : n *= dpi/2.54;               break;
+			case 'mm'  : n *= dpi/25.4;               break;
+			case 'em'  : n *= fontSize;               break;
+			case 'ex'  : n *= fontSize / 2;           break;
+			case 'ch'  : n *= fontSize / 2;           break;  // for now, need a better way to express this...
+			case 'rem' : n *= rootFontSize;           break;
+			case 'vw'  : n *= vW / 100;               break;
+			case 'vh'  : n *= vH / 100;               break;
+			case 'vmin': n *= Math.min(vW, vH) / 100; break;
+			case '%'   : n *= elemWH / 100;           break;
+
+			case 'turn':                              break;
+			case 'deg' : n *= 1/360;                  break;
+			case 'grad': n *= 1/400;                  break;
+			case 'rad' : n *= 1/(2*Math.PI);          break;
+
+			case 's'   :                              break;
+			case 'ms'  : n *= 1/1000;                 break;
+
+			case 'Hz'  :                              break;
+			case 'kHz' : n *= 1000;                   break;
+
+			case 'dpi' :                              break;
+			case 'dpcm': n *= 2.54;                   break;
+			case 'dppx':                              break;
+
+			default    :                              break;  // assume px
+		}
+
+		// convert n to eUnit
+		switch (eUnit) {
+			case 'px'  :                              break;
+			case 'pt'  : n /= 72/dpi;                 break;
+			case 'pc'  : n /= 72/dpi*12;              break;
+			case 'in'  : n /= dpi;                    break;
+			case 'cm'  : n /= dpi/2.54;               break;
+			case 'mm'  : n /= dpi/25.4;               break;
+			case 'em'  : n /= fontSize;               break;
+			case 'ex'  : n /= fontSize / 2;           break;
+			case 'ch'  : n /= fontSize / 2;           break;  // for now, need a better way to express this...
+			case 'rem' : n /= rootFontSize;           break;
+			case 'vw'  : n /= vW / 100;               break;
+			case 'vh'  : n /= vH / 100;               break;
+			case 'vmin': n /= Math.min(vW, vH) / 100; break;
+			case '%'   : n /= elemWH / 100;           break;
+
+			case 'turn':                              break;
+			case 'deg' : n /= 1/360;                  break;
+			case 'grad': n /= 1/400;                  break;
+			case 'rad' : n /= 1/(2*Math.PI);          break;
+
+			case 's'   :                              break;
+			case 'ms'  : n /= 1/1000;                 break;
+
+			case 'Hz'  :                              break;
+			case 'kHz' : n /= 1000;                   break;
+
+			case 'dpi' :                              break;
+			case 'dpcm': n /= 2.54;                   break;
+			case 'dppx':                              break;
+
+			default    :                              break;  // assume px
+		}
+
 		return n;
+	},
+
+	directionNormalize: function(dir, opts) {
+		if (typeof dir !== 'string') return null;
+		var newDir = dir;
+
+		// top/bottom/up/down conversion
+		if ( opts['useTopBottom'] || !opts['useUpDown'] )
+			newDir = newDir.replace(/up|upper/i, 'top').replace(/lower|down/i, 'bottom');
+		if ( !opts['useTopBottom'] || opts['useUpDown'] )
+			newDir = newDir.replace(/top(\w+)/i,    "upper$1").replace(/top/i,    'up')
+								.replace(/bottom(\w+)/i, "lower$1").replace(/bottom/i, 'down');
+
+		// center/middle conversion
+		if ( opts['useCenter'] || !opts['useMiddle'] )
+			newDir = newDir.replace(/middle/i, 'center');
+		if ( !opts['useCenter'] || opts['useMiddle'] )
+			newDir = newDir.replace(/center/i, 'middle');
+
+		// flip direction
+		if ( opts['flip'] ) newDir = $.effects.dirNormFlipHash[newDir.toLowerCase()] || newDir;
+
+		// upper/lower
+		if ( opts['upper'] )      newDir = newDir.toUpperCase();
+		if ( opts['lower'] )      newDir = newDir.toLowerCase();
+		if ( opts['capitalize'] ) newDir = newDir.charAt(0).toUpperCase() + newDir.slice(1);
+
+		return newDir;
 	}
 });
-
-
 
 /******************************************************************************/
 /*********************************** EASING ***********************************/
